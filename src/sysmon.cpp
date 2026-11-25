@@ -1,36 +1,9 @@
 
-#include <Arduino.h>
-#include <SPI.h>
-#include <WiFi.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
-
 // ==========================================
-// CYD ESP32-2432S028R configuration
+// Common CYD configuration and setup
 // ==========================================
 
-// Display pins
-#define TFT_MISO 12
-#define TFT_MOSI 13
-#define TFT_SCLK 14
-#define TFT_CS   15
-#define TFT_DC   2
-#define TFT_RST  -1
-#define TFT_BL   21
-
-// Display dimensions
-#define SCREEN_WIDTH  320
-#define SCREEN_HEIGHT 240
-
-// SPI display
-SPIClass displaySPI(HSPI);
-
-Adafruit_ILI9341 tft(
-    &displaySPI,
-    TFT_DC,
-    TFT_CS,
-    TFT_RST
-);
+#include "common.cpp"
 
 // ==========================================
 // Draw screen header
@@ -65,29 +38,63 @@ void drawHeader() {
 
 void setup() {
 
-    Serial.begin(115200);
-
-    // Backlight
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
-
-    // Initialize SPI
-    displaySPI.begin(
-        TFT_SCLK,
-        TFT_MISO,
-        TFT_MOSI,
-        TFT_CS
-    );
-
-    // Initialize display
-    tft.begin();
-    tft.setRotation(1);
-
-    delay(500);
+    setup_display();
 
     drawHeader();
+}
 
-    Serial.println("System Info initialized");
+void printTaskStats() {
+
+    char *stats = (char *)malloc(2048);
+
+    if (!stats) return;
+
+    vTaskGetRunTimeStats(stats);
+
+    char *line = strtok(stats, "\n");
+
+    tft.setTextSize(1);
+    tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+
+    while (line != NULL) {
+
+        // Skip leading whitespace and control characters
+        while (*line && (unsigned char)*line <= 32) {
+            line++;
+        }
+
+        if (*line) {
+
+            // Replace tabs and repeated whitespace with single spaces
+            char cleaned[80];
+            int out = 0;
+            bool lastSpace = false;
+
+            while (*line && out < sizeof(cleaned) - 1) {
+
+                unsigned char c = *line++;
+
+                if (c <= 32) {
+                    if (!lastSpace) {
+                        cleaned[out++] = ' ';
+                        lastSpace = true;
+                    }
+                }
+                else {
+                    cleaned[out++] = c;
+                    lastSpace = false;
+                }
+            }
+
+            cleaned[out] = '\0';
+
+            tft.println(cleaned);
+        }
+
+        line = strtok(NULL, "\n");
+    }
+
+    free(stats);
 }
 
 // ==========================================
@@ -98,8 +105,8 @@ void loop() {
 
     // Clear previous readings
     tft.fillRect(
-        0, 55,
-        SCREEN_WIDTH, 100,
+        0, 0,
+        SCREEN_WIDTH, SCREEN_HEIGHT ,
         ILI9341_BLACK
     );
 
@@ -113,7 +120,7 @@ void loop() {
     float tempC = temperatureRead();
     float tempF = (tempC * 9.0 / 5.0) + 32.0;
 
-    tft.setCursor(8, 65);
+    tft.setCursor(0, 0);
 
     tft.print("Temp: ");
     tft.print(tempC, 1);
@@ -168,9 +175,10 @@ tft.print(" MB\nUptime: ");
 tft.print(uptime / 3600); // hours
 tft.print("h ");
 tft.print((uptime % 3600) / 60); // minutes 
-tft.print("m\nchip Rev: ");
-tft.print(chipRevision);
-
+//tft.print("m\nchip Rev: ");
+//tft.print(chipRevision);
+tft.println("m");
+printTaskStats();
 
 
     // --------------------------------------
@@ -195,5 +203,5 @@ tft.print(chipRevision);
         chipRevision
     );
 
-    delay(1000);
+    delay(10000);
 }
