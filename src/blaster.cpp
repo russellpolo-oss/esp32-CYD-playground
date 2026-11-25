@@ -27,6 +27,10 @@ BlasterCanvas gameFrame;
 const uint8_t FRAME_BLACK = 0x00;
 const uint8_t FRAME_DARKGREY = 0x49;
 const uint8_t FRAME_WHITE = 0xFF;
+const uint8_t targetColors[] = {
+  0xE0, 0x1C, 0x03, 0xFC, 0x1F, 0xE3, 0xF0, 0xFF
+};
+const int TARGET_COLOR_COUNT = sizeof(targetColors) / sizeof(targetColors[0]);
 
 /* ===== SOUND STATE ===== */
 bool soundActive = false;
@@ -241,6 +245,7 @@ struct Target {
   int x;
   int y;
   int frame; // current frame in the animation
+  uint8_t color;
 };
 
 Target targets[MAX_TARGETS];
@@ -263,6 +268,7 @@ struct Explosion {
   int x;
   int y;
   int lowery;
+  uint8_t color;
 };
 
 Explosion explosions[MAX_TARGETS];
@@ -359,6 +365,7 @@ void spawnTarget() {
       targets[i].x = SCREEN_WIDTH - TARGETSIZE;
       targets[i].y = rows[random(ROWCOUNT)];
       targets[i].frame=0;
+      targets[i].color = targetColors[random(TARGET_COLOR_COUNT)];
       return;
     }
   }
@@ -379,13 +386,14 @@ void spawnBullet(int x , int y) {
 
 
 
-void spawnExplosion(int startx, int starty) {
+void spawnExplosion(int startx, int starty, uint8_t color) {
   for (int i = 0; i < MAX_TARGETS; i++) {
     if (!explosions[i].active) {
       explosions[i].active = true;
       explosions[i].x = startx;
       explosions[i].y = starty;
       explosions[i].lowery = starty;
+      explosions[i].color = color;
       return;
     }
   }
@@ -598,7 +606,7 @@ void blaster_game()
         {
           targets[i].active = false;
           score++;
-          spawnExplosion(targets[i].x,targets[i].y);
+          spawnExplosion(targets[i].x, targets[i].y, targets[i].color);
         };
   };
    if (shockwaveX>SCREEN_WIDTH){
@@ -659,7 +667,7 @@ void blaster_game()
       if (current_max_bullets<MAX_BULLETS){current_max_bullets++;};
       shockwavePoints++;
       hitSound();
-      spawnExplosion(targets[i].x,targets[i].y);
+      spawnExplosion(targets[i].x, targets[i].y, targets[i].color);
         }
     }
 
@@ -715,16 +723,16 @@ void blaster_game()
   for (int i = 0; i < MAX_TARGETS; i++) {
     if (targets[i].active) {
       drawScaledBitmap(gameFrame, targets[i].x, targets[i].y,
-                       ringFrames[targets[i].frame], 8, 8, FRAME_WHITE);
+                       ringFrames[targets[i].frame], 8, 8, targets[i].color);
     }
   }
 
   for (int i = 0; i < MAX_TARGETS; i++) {
     if (explosions[i].active) {
       drawScaledBitmap(gameFrame, explosions[i].x, explosions[i].y,
-                       EXPLODETOP, 8, 8, FRAME_WHITE);
+                       EXPLODETOP, 8, 8, explosions[i].color);
       drawScaledBitmap(gameFrame, explosions[i].x, explosions[i].lowery,
-                       EXPLODEBOT, 8, 8, FRAME_WHITE);
+                       EXPLODEBOT, 8, 8, explosions[i].color);
     }
   }
 
