@@ -117,12 +117,9 @@ void loop() {
 
     tft.print("Temp: ");
     tft.print(tempC, 1);
-    tft.print(" C");
-
-    tft.setCursor(8, 95);
-
+    tft.print(" C / ");
     tft.print(tempF, 1);
-    tft.print(" F");
+    tft.println(" F");
 
     // --------------------------------------
     // Heap memory
@@ -134,19 +131,47 @@ void loop() {
     float heapPercent =
         (heapFree * 100.0) / heapTotal;
 
-    tft.setCursor(8, 135);
+   
 
-    tft.print("Heap: ");
+    tft.print("Heap:");
     tft.print(heapFree / 1024);
     tft.print("/");
     tft.print(heapTotal / 1024);
-    tft.print(" KB");
+    tft.print("KB");
 
-    tft.setCursor(8, 165);
+    
 
-    tft.print("Free: ");
+    tft.print(" Free: ");
     tft.print(heapPercent, 1);
-    tft.print("%");
+    tft.println("%");
+
+//Minimum free RAM	ESP.getMinFreeHeap()
+uint32_t minfree = ESP.getMinFreeHeap();
+//CPU frequency	ESP.getCpuFreqMHz()
+uint32_t cpuFreq = ESP.getCpuFreqMHz();
+//Flash size	ESP.getFlashChipSize()
+uint32_t flashSize = ESP.getFlashChipSize();
+//Wi-Fi RSSI	WiFi.RSSI()
+//Uptime	millis()
+uint32_t uptime = millis() / 1000; // in seconds
+//Chip revision	ESP.getChipRevision()
+uint32_t chipRevision = ESP.getChipRevision();
+
+tft.print("Min Free: ");
+tft.print(minfree / 1024);  
+
+tft.print("KB | \nCPU: ");
+tft.print(cpuFreq);
+tft.print(" MHz | Flash: ");
+tft.print(flashSize / (1024 * 1024));   
+tft.print(" MB\nUptime: ");
+tft.print(uptime / 3600); // hours
+tft.print("h ");
+tft.print((uptime % 3600) / 60); // minutes 
+tft.print("m\nchip Rev: ");
+tft.print(chipRevision);
+
+
 
     // --------------------------------------
     // Serial diagnostics
@@ -154,12 +179,20 @@ void loop() {
 
     Serial.printf(
         "Temp: %.1f C / %.1f F | "
-        "Heap: %u / %u bytes (%.1f%% free)\n",
+        "Heap: %u / %u bytes (%.1f%% free) \n"
+        "CPU: %u MHz | Flash: %u MB\n"
+        "Uptime: %u h %u m\n"
+        "Chip Rev: %u\n",
         tempC,
         tempF,
         heapFree,
         heapTotal,
-        heapPercent
+        heapPercent,
+        cpuFreq, 
+        flashSize,
+        uptime/3600,
+        (uptime % 3600) / 60,
+        chipRevision
     );
 
     delay(1000);
