@@ -1,3 +1,4 @@
+#include "defaults.h"
 #include "common.cpp"
 #include "common_touch.cpp"
 
@@ -28,7 +29,14 @@ const uint8_t FRAME_BLACK = 0x00;
 const uint8_t FRAME_DARKGREY = 0x49;
 const uint8_t FRAME_WHITE = 0xFF;
 const uint8_t targetColors[] = {
-  0xE0, 0x1C, 0x03, 0xFC, 0x1F, 0xE3, 0xF0, 0xFF
+  0xE0, // Red
+  0x1C, // Green
+  0x03, // Blue
+  0xFC, // Yellow
+  0x1F, // Cyan
+  0xE3, // Magenta
+  0xF0, // Orange
+  0xFF  // White
 };
 const int TARGET_COLOR_COUNT = sizeof(targetColors) / sizeof(targetColors[0]);
 

@@ -54,7 +54,7 @@ void setup_display() {
 
     // Initialize display
     tft.begin();
-    tft.setRotation(1);
+    tft.setRotation(DEFAULT_ROTATION);
 
     delay(500);
 

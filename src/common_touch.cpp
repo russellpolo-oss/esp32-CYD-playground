@@ -25,7 +25,7 @@ void setup_touch() {
 
     // Initialize touchscreen
     ts.begin();
-    ts.setRotation(1);
+    ts.setRotation(DEFAULT_ROTATION);
 
     Serial.println("Touchscreen initialized");
  

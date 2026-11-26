@@ -1,7 +1,8 @@
+
 // ==========================================
 // Common CYD configuration and setup
 // ==========================================
-
+#include "defaults.h"
 #include "common.cpp"
 #include "common_touch.cpp"
 
