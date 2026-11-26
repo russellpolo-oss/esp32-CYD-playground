@@ -12,7 +12,8 @@
 
 namespace {
 
-const uint16_t MAX_ITERATIONS = 255;
+const uint16_t ITERATION_INCREMENT = 256;
+const uint8_t BLACK_ITERATION_MARKER = 0xFF;
 const int TILE_SIZE = 20;
 const size_t PIXEL_COUNT = SCREEN_WIDTH * SCREEN_HEIGHT;
 const size_t COMPUTED_MAP_BYTES = (PIXEL_COUNT + 7) / 8;
@@ -32,6 +33,7 @@ const int ZOOM_ANCHOR_Y = SCREEN_HEIGHT / 2;
 const int AUTO_BUTTON_SIZE = 30;
 const int AUTO_BUTTON_X = SCREEN_WIDTH - AUTO_BUTTON_SIZE;
 const int AUTO_BUTTON_Y = SCREEN_HEIGHT - AUTO_BUTTON_SIZE;
+const int ITERATION_BUTTON_Y = AUTO_BUTTON_Y - AUTO_BUTTON_SIZE;
 const uint8_t CORNER_SAMPLE_MASK = 0x0F;
 const uint8_t CENTER_SAMPLE_MASK = 0x10;
 
@@ -92,6 +94,7 @@ bool touchWasDown = false;
 bool autoZoomEnabled = false;
 bool queueProcessingEnabled = false;
 bool primaryResultPending = false;
+volatile uint16_t iterationThreshold = 255;
 uint32_t renderGeneration = 0;
 uint32_t outstandingJobs = 0;
 uint32_t currentGenerationJobs = 0;
@@ -129,8 +132,9 @@ uint8_t mandelbrotValue(double real, double imaginary, uint32_t core) {
     double zReal = 0.0;
     double zImaginary = 0.0;
     uint16_t iteration = 0;
+    uint16_t threshold = iterationThreshold;
 
-    while (iteration < MAX_ITERATIONS &&
+    while (iteration < threshold &&
         zReal * zReal + zImaginary * zImaginary <= 4.0) {
         double nextReal = zReal * zReal - zImaginary * zImaginary + real;
         zImaginary = 2.0 * zReal * zImaginary + imaginary;
@@ -245,6 +249,11 @@ void markPixelComputed(size_t index) {
     computedMap[index >> 3] |= static_cast<uint8_t>(1U << (index & 7));
 }
 
+void clearPixelComputed(size_t index) {
+    computedMap[index >> 3] &=
+        static_cast<uint8_t>(~(1U << (index & 7)));
+}
+
 void markPixelInFlight(size_t index) {
     inFlightMap[index >> 3] |= static_cast<uint8_t>(1U << (index & 7));
 }
@@ -272,7 +281,7 @@ uint8_t iterationAtPixel(int x, int y) {
 }
 
 uint16_t colorForIteration(uint8_t iteration) {
-    if (iteration == MAX_ITERATIONS) {
+    if (iteration == BLACK_ITERATION_MARKER) {
         return ILI9341_BLACK;
     }
 
@@ -293,29 +302,38 @@ void drawAutoZoomButton() {
     tft.print('A');
 }
 
+void drawIterationButton() {
+    tft.fillRect(AUTO_BUTTON_X, ITERATION_BUTTON_Y, AUTO_BUTTON_SIZE,
+        AUTO_BUTTON_SIZE, ILI9341_BLACK);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+    tft.setCursor(AUTO_BUTTON_X + 8, ITERATION_BUTTON_Y + 6);
+    tft.print('+');
+}
+
 void drawFractalBox(const Box &box, uint16_t color) {
-    if (box.x1 < AUTO_BUTTON_X || box.y1 < AUTO_BUTTON_Y) {
+    if (box.x1 < AUTO_BUTTON_X || box.y1 < ITERATION_BUTTON_Y) {
         tft.fillRect(box.x0, box.y0, box.x1 - box.x0 + 1,
             box.y1 - box.y0 + 1, color);
         return;
     }
 
-    if (box.y0 < AUTO_BUTTON_Y) {
-        int topHeight = AUTO_BUTTON_Y - box.y0;
+    if (box.y0 < ITERATION_BUTTON_Y) {
+        int topHeight = ITERATION_BUTTON_Y - box.y0;
         tft.fillRect(box.x0, box.y0, box.x1 - box.x0 + 1,
             topHeight, color);
     }
 
     if (box.x0 < AUTO_BUTTON_X) {
         int leftWidth = AUTO_BUTTON_X - box.x0;
-        int bottomY = max(box.y0, AUTO_BUTTON_Y);
+        int bottomY = max(box.y0, ITERATION_BUTTON_Y);
         tft.fillRect(box.x0, bottomY, leftWidth,
             box.y1 - bottomY + 1, color);
     }
 }
 
 void drawFractalPixel(int x, int y, uint16_t color) {
-    if (x < AUTO_BUTTON_X || y < AUTO_BUTTON_Y) {
+    if (x < AUTO_BUTTON_X || y < ITERATION_BUTTON_Y) {
         tft.drawPixel(x, y, color);
     }
 }
@@ -571,11 +589,14 @@ void reportImageComplete() {
         (viewport.imaginaryMax - viewport.imaginaryMin) * 0.5;
     double visibleRadius = realRadius < imaginaryRadius
         ? realRadius : imaginaryRadius;
+    double elapsedSeconds = (millis() - imageStartedAt) / 1000.0;
 
     Serial.printf(
-        "Mandelbrot image complete in %lu ms\n"
-        "Center: real=%.10f imaginary=%.10f | visible radius=%.8e\n",
-        millis() - imageStartedAt,
+        "Mandelbrot image complete in %.1f seconds\n"
+        "Iteration threshold: %u\n"
+        "Center: real=%.10e imaginary=%.10e | visible radius=%.8e\n",
+        elapsedSeconds,
+        static_cast<unsigned int>(iterationThreshold),
         centerReal,
         centerImaginary,
         visibleRadius
@@ -953,12 +974,14 @@ void dumpCalculationStats() {
     portEXIT_CRITICAL(&calculationStatsMux);
 
     Serial.printf(
+        "Iteration threshold=%u\n"
         "Calculation queues: work=%lu/%lu results=%lu/%lu "
         "outstanding=%lu/%lu\n"
         "Mandelbrot point calculations: core0=%lu core1=%lu total=%lu "
         "cache hits=%lu duplicate calculations avoided=%lu\n"
         "Requests: dispatched=%lu deferred-in-flight=%lu "
         "deferred-queue-full=%lu stale results=%lu\n",
+        static_cast<unsigned int>(iterationThreshold),
         static_cast<unsigned long>(workQueueLength),
         static_cast<unsigned long>(WORK_QUEUE_CAPACITY),
         static_cast<unsigned long>(resultQueueLength),
@@ -984,6 +1007,7 @@ void resetRenderState() {
     nextTileY = 0;
     imageComplete = false;
     tft.fillScreen(ILI9341_BLACK);
+    drawIterationButton();
     drawAutoZoomButton();
     imageStartedAt = millis();
 }
@@ -993,6 +1017,40 @@ void beginImage() {
     currentGenerationJobs = 0;
     memset(inFlightMap, 0, sizeof(inFlightMap));
     memset(computedMap, 0, sizeof(computedMap));
+    resetRenderState();
+}
+
+void increaseIterationThreshold() {
+    autoZoomEnabled = false;
+    drawAutoZoomButton();
+
+    if (iterationThreshold >
+        static_cast<uint16_t>(UINT16_MAX - ITERATION_INCREMENT)) {
+        Serial.printf("Iteration threshold is already at maximum (%u)\n",
+            static_cast<unsigned int>(iterationThreshold));
+        return;
+    }
+
+    uint16_t previousThreshold = iterationThreshold;
+    iterationThreshold = static_cast<uint16_t>(
+        iterationThreshold + ITERATION_INCREMENT);
+    size_t invalidatedPixels = 0;
+    for (size_t index = 0; index < PIXEL_COUNT; ++index) {
+        if (pixelIsComputed(index) &&
+            iterationValues[index] == BLACK_ITERATION_MARKER) {
+            clearPixelComputed(index);
+            ++invalidatedPixels;
+        }
+    }
+
+    ++renderGeneration;
+    currentGenerationJobs = 0;
+    Serial.printf(
+        "Iteration threshold increased to %u; recomputing %lu "
+        "black-marked pixels (previous threshold %u)\n",
+        static_cast<unsigned int>(iterationThreshold),
+        static_cast<unsigned long>(invalidatedPixels),
+        static_cast<unsigned int>(previousThreshold));
     resetRenderState();
 }
 
@@ -1059,7 +1117,11 @@ bool updateTouch() {
         int y = constrain(map(point.y, 200, 3800, 0, SCREEN_HEIGHT - 1),
             0, SCREEN_HEIGHT - 1);
 
-        if (x >= AUTO_BUTTON_X && y >= AUTO_BUTTON_Y) {
+        if (x >= AUTO_BUTTON_X && y >= ITERATION_BUTTON_Y &&
+            y < AUTO_BUTTON_Y) {
+            increaseIterationThreshold();
+            touchHandled = true;
+        } else if (x >= AUTO_BUTTON_X && y >= AUTO_BUTTON_Y) {
             autoZoomEnabled = !autoZoomEnabled;
             Serial.printf("Auto zoom %s\n",
                 autoZoomEnabled ? "enabled" : "disabled");
