@@ -916,6 +916,8 @@ void calculationWorkerTask(void *) {
             portEXIT_CRITICAL(&workerFailureMux);
             vTaskSuspend(nullptr);
         }
+        // Let IDLE0 run between jobs so its watchdog hook is serviced.
+        vTaskDelay(1);
     }
 }
 
