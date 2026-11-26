@@ -6,6 +6,7 @@
 
 #include "defaults.h"
 #include "common.cpp"
+#include "common_stats.cpp"
 #include "SECRETS.h"
 
 #include <ArduinoJson.h>
@@ -22,6 +23,7 @@
 namespace {
 
 const unsigned long IMAGE_DISPLAY_MS = 10000;
+const unsigned long STATS_DUMP_INTERVAL_MS = 10000;
 const unsigned long WIFI_RETRY_MS = 15000;
 const unsigned long PLAYLIST_RETRY_MS = 5000;
 const unsigned long PLAYLIST_REFRESH_MS = 60UL * 60UL * 1000UL;
@@ -47,6 +49,7 @@ struct PrefetchResult {
 std::vector<String> imageUrls;
 size_t nextImageIndex = 0;
 unsigned long lastImageDisplayed = 0;
+unsigned long lastStatsDump = 0;
 unsigned long lastWifiAttempt = 0;
 unsigned long lastPlaylistAttempt = 0;
 unsigned long lastPlaylistRefresh = 0;
@@ -427,6 +430,11 @@ void loop() {
     displayReadyImage();
 
     unsigned long now = millis();
+    if (now - lastStatsDump >= STATS_DUMP_INTERVAL_MS) {
+        dump_stats_serial();
+        lastStatsDump = now;
+    }
+
     if (WiFi.status() != WL_CONNECTED) {
         wifiWasConnected = false;
         if (now - lastWifiAttempt >= WIFI_RETRY_MS) {
