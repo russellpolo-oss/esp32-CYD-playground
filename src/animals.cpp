@@ -38,6 +38,7 @@ const uint16_t LIGHT_BLUE = 0x867D;
 const uint16_t GOLD = 0xFEA0;
 const uint16_t OPAQUE_RUN_BUFFER_SIZE = 40;
 const uint8_t NO_BOX = 0xFF;
+const uint16_t MAX_TRACKED_BOARD_STATES = 128;
 
 struct BoxPosition {
     int x;
@@ -71,6 +72,9 @@ struct MovingAnimal {
 BoxPosition boxPositions[TOTAL_BOXES];
 BoardState gameBoard;
 BoardState undoBoard;
+BoardState seenBoardStates[MAX_TRACKED_BOARD_STATES];
+uint16_t seenBoardStateCount = 0;
+uint16_t nextSeenBoardState = 0;
 uint16_t currentMoveCount = 0;
 uint8_t expectedMoveCount = 0;
 uint32_t currentLevel = 1;
@@ -84,7 +88,54 @@ bool boardDeadlocked = false;
 bool levelLoadFailed = false;
 bool animationInProgress = false;
 bool showingLevelMenu = SHOW_MENU;
+bool repeatedBoardStateDetected = false;
 uint32_t lastTouchTime = 0;
+
+bool boardStatesEqual(const BoardState &left, const BoardState &right) {
+    for (uint8_t box = 0; box < TOTAL_BOXES; ++box) {
+        const BoxState &leftBox = left.boxes[box];
+        const BoxState &rightBox = right.boxes[box];
+        if (leftBox.count != rightBox.count ||
+            leftBox.completed != rightBox.completed) {
+            return false;
+        }
+        for (uint8_t item = 0; item < leftBox.count; ++item) {
+            if (leftBox.animals[item] != rightBox.animals[item]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool rememberBoardState(const BoardState &state) {
+    for (uint16_t index = 0; index < seenBoardStateCount; ++index) {
+        if (boardStatesEqual(seenBoardStates[index], state)) {
+            return true;
+        }
+    }
+
+    if (seenBoardStateCount < MAX_TRACKED_BOARD_STATES) {
+        seenBoardStates[seenBoardStateCount++] = state;
+    } else {
+        seenBoardStates[nextSeenBoardState] = state;
+        nextSeenBoardState =
+            (nextSeenBoardState + 1) % MAX_TRACKED_BOARD_STATES;
+    }
+    return false;
+}
+
+void resetBoardStateHistory() {
+    seenBoardStateCount = 0;
+    nextSeenBoardState = 0;
+    repeatedBoardStateDetected = false;
+    rememberBoardState(gameBoard);
+}
+
+bool restartButtonAvailable() {
+    return currentMoveCount >= expectedMoveCount ||
+        repeatedBoardStateDetected;
+}
 
 AnimalMetadata readAnimalMetadata(uint8_t index) {
     AnimalMetadata animal;
@@ -313,6 +364,7 @@ bool loadLevelFromTable(uint32_t level) {
     boardDeadlocked = false;
     animationInProgress = false;
     levelLoadFailed = false;
+    resetBoardStateHistory();
     return true;
 }
 
@@ -491,12 +543,12 @@ void drawGameInformation() {
         tft.print("PAR ");
         tft.println(expectedMoveCount);
         drawButton(y + 58, "NEXT LEVEL");
-        drawButton(y + 82, currentMoveCount >= expectedMoveCount ?
+        drawButton(y + 82, restartButtonAvailable() ?
             "RESTART" : "PLAY AGAIN");
         return;
     }
 
-    if (currentMoveCount >= expectedMoveCount) {
+    if (restartButtonAvailable()) {
         tft.setTextSize(1);
         tft.setCursor(x + 2, y + 4);
         tft.print("LEVEL ");
@@ -769,6 +821,9 @@ void tryPlayerMove(uint8_t destination) {
     ++currentMoveCount;
     selectedSource = NO_BOX;
     updateCompletedBoxes();
+    if (rememberBoardState(gameBoard)) {
+        repeatedBoardStateDetected = true;
+    }
     playerWon = isWinningBoard(gameBoard);
     boardDeadlocked = !playerWon && !hasLegalMove(gameBoard);
     drawBox(source, gameBoard.boxes[source].count, false);
@@ -814,6 +869,9 @@ bool handleInformationTouch(int x, int y) {
             undoAvailable = false;
             boardDeadlocked = false;
             playerWon = false;
+            if (rememberBoardState(gameBoard)) {
+                repeatedBoardStateDetected = true;
+            }
             drawWholeScreen();
             return true;
         } else if (y >= top + 82 && y < top + 102) {
@@ -823,7 +881,7 @@ bool handleInformationTouch(int x, int y) {
         return false;
     }
 
-    if (currentMoveCount >= expectedMoveCount &&
+    if (restartButtonAvailable() &&
         y >= top + PAR_RESTART_BUTTON_OFFSET &&
         y < top + PAR_RESTART_BUTTON_OFFSET + INFO_BUTTON_HEIGHT) {
         startNewGame(false);
@@ -847,7 +905,7 @@ void handleTap(int x, int y) {
     if (animationInProgress) {
         return;
     }
-    if (currentMoveCount >= expectedMoveCount &&
+    if (restartButtonAvailable() &&
         handleInformationTouch(x, y)) {
         return;
     }
