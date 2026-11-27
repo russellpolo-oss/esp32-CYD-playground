@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Generate random animal-sorting boards and save boards with legal solutions.
 
-Each saved line contains the solution move count followed by the nine box
-contents. Animal IDs are 1-8; digits within a box are ordered bottom-to-top.
-An empty box is encoded as 0.
+Each saved line contains the floating-point difficulty score, shortest move
+count, and nine box contents. Animal IDs are 1-8; digits within a box are
+ordered bottom-to-top. An empty box is encoded as 0.
 """
 
 import argparse
 import random
-import sys
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -21,6 +21,7 @@ MAX_DEPTH = 1000
 Stack = Tuple[int, ...]
 Board = Tuple[Stack, ...]
 Move = Tuple[int, int, int]
+SolveStats = Tuple[int, int, int]
 
 
 def is_complete(stack: Stack) -> bool:
@@ -258,40 +259,42 @@ def canonical_board(board: Board) -> Board:
     return tuple(sorted(board))
 
 
-def solve(board: Board, max_depth: int) -> Optional[List[Move]]:
-    """Depth-first search, pruning repeated states reached at equal depth."""
-    visited: Dict[Board, int] = {}
-    path: List[Move] = []
+def solve(board: Board, max_depth: int) -> Optional[SolveStats]:
+    """Find shortest solutions and count unique reachable terminal states."""
+    initial_key = canonical_board(board)
+    queue = deque([(board, 0)])
+    distances: Dict[Board, int] = {initial_key: 0}
+    dead_ends: Set[Board] = set()
+    solutions: Set[Board] = set()
+    shortest_moves: Optional[int] = None
 
-    def search(state: Board, depth: int) -> bool:
-        if is_solved(state):
-            return True
-        if depth >= max_depth:
-            return False
-
-        # Every move can reduce the total number of animal runs by at most one.
-        minimum_remaining = max(0, animal_run_count(state) - ANIMAL_TYPES)
-        if depth + minimum_remaining > max_depth:
-            return False
-
+    while queue:
+        state, depth = queue.popleft()
         key = canonical_board(state)
-        previous_depth = visited.get(key)
-        if previous_depth is not None and previous_depth <= depth:
-            return False
-        visited[key] = depth
+        if is_solved(state):
+            solutions.add(key)
+            if shortest_moves is None or depth < shortest_moves:
+                shortest_moves = depth
+            continue
 
         successors = legal_successors(state)
         if not successors:
-            return False
+            dead_ends.add(key)
+            continue
+        if depth >= max_depth:
+            continue
 
-        for _, next_state, move in successors:
-            path.append(move)
-            if search(next_state, depth + 1):
-                return True
-            path.pop()
-        return False
+        next_depth = depth + 1
+        for _, next_state, _ in successors:
+            next_key = canonical_board(next_state)
+            known_depth = distances.get(next_key)
+            if known_depth is None:
+                distances[next_key] = next_depth
+                queue.append((next_state, next_depth))
 
-    return path if search(board, 0) else None
+    if shortest_moves is None:
+        return None
+    return shortest_moves, len(dead_ends), len(solutions)
 
 
 def encode_stack(stack: Stack) -> int:
@@ -311,34 +314,45 @@ def load_saved_boards(path: Path) -> Set[Tuple[int, ...]]:
 
     with path.open("r", encoding="utf-8") as solutions:
         for line in solutions:
+            fields = [value.strip() for value in line.split(",")]
+            if len(fields) == BOX_COUNT + 2:
+                board_fields = fields[2:]
+            elif len(fields) == BOX_COUNT + 1:
+                board_fields = fields[1:]
+            else:
+                continue
             try:
-                values = tuple(
-                    int(value.strip()) for value in line.split(",")
-                )
+                board = tuple(int(value) for value in board_fields)
             except ValueError:
                 continue
-            if len(values) == BOX_COUNT + 1:
-                saved.add(values[1:])
+            saved.add(board)
     return saved
 
 
 def save_solution(
     path: Path,
+    difficulty_score: float,
     move_count: int,
     encoded_board: Sequence[int],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    record = format_solution_record(move_count, encoded_board)
+    record = format_solution_record(
+        difficulty_score, move_count, encoded_board
+    )
     with path.open("a", encoding="utf-8") as solutions:
         solutions.write(record + "\n")
         solutions.flush()
 
 
 def format_solution_record(
+    difficulty_score: float,
     move_count: int,
     encoded_board: Sequence[int],
 ) -> str:
-    return ",".join(str(value) for value in (move_count, *encoded_board))
+    return ",".join(
+        str(value)
+        for value in (float(difficulty_score), move_count, *encoded_board)
+    )
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -399,7 +413,6 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_arguments()
-    sys.setrecursionlimit(max(sys.getrecursionlimit(), args.max_depth + 200))
     rng = random.Random(args.seed)
     saved_boards = load_saved_boards(args.output)
     attempt = 0
@@ -420,27 +433,28 @@ def main() -> None:
                 board = make_starting_board(rng)
 
             encoded = encode_board(board)
-            print("trying " + ",".join(str(value) for value in encoded), flush=True)
-
-            solution = solve(board, args.max_depth)
-            if solution is None:
-                print(
-                    "no solution found in under {}".format(args.max_depth),
-                    flush=True,
-                )
+            stats = solve(board, args.max_depth)
+            if stats is None:
                 continue
 
+            shortest_moves, dead_end_count, solution_count = stats
+            difficulty_score = shortest_moves * max(
+                1.0, dead_end_count / solution_count
+            )
             signature = encoded
             if signature not in saved_boards:
-                save_solution(args.output, len(solution), encoded)
+                save_solution(
+                    args.output, difficulty_score, shortest_moves, encoded
+                )
                 saved_boards.add(signature)
             print(
-                format_solution_record(len(solution), encoded),
+                format_solution_record(
+                    difficulty_score, shortest_moves, encoded
+                ),
                 flush=True,
             )
-            print("solved in {} moves".format(len(solution)), flush=True)
     except KeyboardInterrupt:
-        print("stopped", flush=True)
+        pass
 
 
 if __name__ == "__main__":

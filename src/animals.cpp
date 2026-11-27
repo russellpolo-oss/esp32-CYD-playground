@@ -10,7 +10,19 @@
 #include <string.h>
 
 namespace {
-
+const bool SHOW_MENU = true;
+const uint8_t LEVEL_MENU_VALUES[] = {
+    1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100
+};
+const uint8_t LEVEL_MENU_VALUE_COUNT =
+    sizeof(LEVEL_MENU_VALUES) / sizeof(LEVEL_MENU_VALUES[0]);
+const int MENU_BUTTON_WIDTH = 52;
+const int MENU_BUTTON_HEIGHT = 42;
+const int MENU_BUTTON_GAP_X = 8;
+const int MENU_BUTTON_ROW_STEP = 56;
+const int MENU_BUTTON_TOP = 58;
+const int INFO_BUTTON_HEIGHT = 20;
+const int PAR_RESTART_BUTTON_OFFSET = 50;
 const uint8_t BOX_CAPACITY = 4;
 const uint8_t BOXES_TOP_ROW = 5;
 const uint8_t BOXES_BOTTOM_ROW = 4;
@@ -71,6 +83,7 @@ bool playerWon = false;
 bool boardDeadlocked = false;
 bool levelLoadFailed = false;
 bool animationInProgress = false;
+bool showingLevelMenu = SHOW_MENU;
 uint32_t lastTouchTime = 0;
 
 AnimalMetadata readAnimalMetadata(uint8_t index) {
@@ -418,8 +431,7 @@ int informationWidth() {
 void drawButton(int y, const char *label) {
     const int x = informationX() + 4;
     const int width = informationWidth() - 8;
-    const int height = 20;
-    tft.drawRect(x, y, width, height, ILI9341_BLACK);
+    tft.drawRect(x, y, width, INFO_BUTTON_HEIGHT, ILI9341_BLACK);
     tft.setTextColor(ILI9341_BLACK);
     tft.setTextSize(1);
     tft.setCursor(x + 4, y + 6);
@@ -479,7 +491,23 @@ void drawGameInformation() {
         tft.print("PAR ");
         tft.println(expectedMoveCount);
         drawButton(y + 58, "NEXT LEVEL");
-        drawButton(y + 82, "PLAY AGAIN");
+        drawButton(y + 82, currentMoveCount >= expectedMoveCount ?
+            "RESTART" : "PLAY AGAIN");
+        return;
+    }
+
+    if (currentMoveCount >= expectedMoveCount) {
+        tft.setTextSize(1);
+        tft.setCursor(x + 2, y + 4);
+        tft.print("LEVEL ");
+        tft.println(currentLevel);
+        tft.setCursor(x + 2, y + 18);
+        tft.print("MOVES ");
+        tft.println(currentMoveCount);
+        tft.setCursor(x + 2, y + 32);
+        tft.print("PAR ");
+        tft.println(expectedMoveCount);
+        drawButton(y + PAR_RESTART_BUTTON_OFFSET, "RESTART");
         return;
     }
 
@@ -496,6 +524,42 @@ void drawGameInformation() {
     tft.setCursor(x + 2, y + 92);
     tft.print("PAR ");
     tft.println(expectedMoveCount);
+}
+
+int levelMenuButtonX(uint8_t index) {
+    const uint8_t row = index / 5;
+    const uint8_t firstIndex = row * 5;
+    const uint8_t itemsInRow = std::min<uint8_t>(
+        5, LEVEL_MENU_VALUE_COUNT - firstIndex);
+    const int rowWidth = itemsInRow * MENU_BUTTON_WIDTH +
+        (itemsInRow - 1) * MENU_BUTTON_GAP_X;
+    const int left = (SCREEN_WIDTH - rowWidth) / 2;
+    return left + (index % 5) *
+        (MENU_BUTTON_WIDTH + MENU_BUTTON_GAP_X);
+}
+
+int levelMenuButtonY(uint8_t index) {
+    return MENU_BUTTON_TOP + (index / 5) * MENU_BUTTON_ROW_STEP;
+}
+
+void drawLevelMenu() {
+    tft.fillScreen(LIGHT_BLUE);
+    tft.setTextColor(ILI9341_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor((SCREEN_WIDTH - 13 * 12) / 2, 18);
+    tft.print("Jump to level");
+
+    tft.setTextSize(2);
+    for (uint8_t index = 0; index < LEVEL_MENU_VALUE_COUNT; ++index) {
+        const int x = levelMenuButtonX(index);
+        const int y = levelMenuButtonY(index);
+        const uint8_t level = LEVEL_MENU_VALUES[index];
+        const uint8_t digits = level >= 100 ? 3 : (level >= 10 ? 2 : 1);
+        tft.drawRect(x, y, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT,
+            ILI9341_BLACK);
+        tft.setCursor(x + (MENU_BUTTON_WIDTH - digits * 12) / 2, y + 13);
+        tft.print(level);
+    }
 }
 
 void drawWholeScreen(int overrideBox = -1, int overrideCount = -1,
@@ -528,6 +592,20 @@ void startNewGame(bool nextLevel) {
         Serial.println(expectedMoveCount);
     }
     drawWholeScreen();
+}
+
+void handleLevelMenuTap(int x, int y) {
+    for (uint8_t index = 0; index < LEVEL_MENU_VALUE_COUNT; ++index) {
+        const int left = levelMenuButtonX(index);
+        const int top = levelMenuButtonY(index);
+        if (x >= left && x < left + MENU_BUTTON_WIDTH &&
+            y >= top && y < top + MENU_BUTTON_HEIGHT) {
+            currentLevel = LEVEL_MENU_VALUES[index];
+            showingLevelMenu = false;
+            startNewGame(false);
+            return;
+        }
+    }
 }
 
 void createStartingBoard() {
@@ -709,21 +787,23 @@ int hitTestBox(int x, int y) {
     return -1;
 }
 
-void handleInformationTouch(int x, int y) {
+bool handleInformationTouch(int x, int y) {
     const int left = informationX() + 4;
     const int right = left + informationWidth() - 8;
     const int top = informationY();
     if (x < left || x >= right) {
-        return;
+        return false;
     }
 
     if (playerWon) {
         if (y >= top + 58 && y < top + 78) {
             startNewGame(true);
+            return true;
         } else if (y >= top + 82 && y < top + 102) {
             startNewGame(false);
+            return true;
         }
-        return;
+        return false;
     }
 
     if (boardDeadlocked) {
@@ -735,13 +815,28 @@ void handleInformationTouch(int x, int y) {
             boardDeadlocked = false;
             playerWon = false;
             drawWholeScreen();
+            return true;
         } else if (y >= top + 82 && y < top + 102) {
             startNewGame(false);
+            return true;
         }
+        return false;
     }
+
+    if (currentMoveCount >= expectedMoveCount &&
+        y >= top + PAR_RESTART_BUTTON_OFFSET &&
+        y < top + PAR_RESTART_BUTTON_OFFSET + INFO_BUTTON_HEIGHT) {
+        startNewGame(false);
+        return true;
+    }
+    return false;
 }
 
 void handleTap(int x, int y) {
+    if (showingLevelMenu) {
+        handleLevelMenuTap(x, y);
+        return;
+    }
     if (levelLoadFailed) {
         return;
     }
@@ -750,6 +845,10 @@ void handleTap(int x, int y) {
         return;
     }
     if (animationInProgress) {
+        return;
+    }
+    if (currentMoveCount >= expectedMoveCount &&
+        handleInformationTouch(x, y)) {
         return;
     }
 
@@ -809,7 +908,12 @@ void handleTouch() {
 void setup() {
     setup_display();
     setup_touch();
-    createStartingBoard();
+    if (SHOW_MENU) {
+        createBoxLayout();
+        drawLevelMenu();
+    } else {
+        createStartingBoard();
+    }
 }
 
 void loop() {
